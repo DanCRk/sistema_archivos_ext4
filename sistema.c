@@ -115,7 +115,7 @@ int leerParticion(int fd){
     }
 
 
-    return -1;
+    return seleccion;
 }
 
 
