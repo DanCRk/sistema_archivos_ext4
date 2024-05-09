@@ -128,7 +128,7 @@ int leerSuperBloque(int fd,int inicioParticion){
         refresh();
         close(fd);
         endwin();
-        return;
+        return -1;
     }
 
     // Calcula el tamaño de bloque y el tamaño de inode
@@ -150,6 +150,31 @@ int leerSuperBloque(int fd,int inicioParticion){
     getchar();
     clear();
     return inicio_superbloque;
+}
+
+int leerDescriptorBloques(int fd,int inicio_superbloque){
+    int inicio_descriptor_bloques = inicio_superbloque + 0x400;
+    // Lee el descriptor de bloques
+    struct ext4_group_desc descriptor_bloques;
+    if (pread(fd, &descriptor_bloques, sizeof(descriptor_bloques), inicio_descriptor_bloques) != sizeof(descriptor_bloques)) {
+        perror("Error leyendo el superbloque");
+        close(fd);
+        return -1;
+    }
+    // Imprime la información del descriptor de bloques
+    printw("Descriptor de Bloques\n\n");
+    printw("Dirección del bloque de bitmap de bloques: %u\n\n", descriptor_bloques.bg_block_bitmap_lo);
+    printw("Dirección del bloque de bitmap de inodes: %u\n\n", descriptor_bloques.bg_inode_bitmap_lo);
+    printw("Dirección del primer bloque de la tabla de inodes: %u\n\n", descriptor_bloques.bg_inode_table_lo);
+    printw("Número de bloques libres: %u\n\n", descriptor_bloques.bg_free_blocks_count_lo);
+    printw("Número de inodes libres: %u\n\n", descriptor_bloques.bg_free_inodes_count_lo);
+    printw("Número de directorios: %u\n\n", descriptor_bloques.bg_used_dirs_count_lo);
+    printw("Flags del grupo: %u\n\n", descriptor_bloques.bg_flags);
+    printw("Checksum del descriptor: %u\n\n", descriptor_bloques.bg_checksum);
+    printw("Presiona una tecla para continuar...");
+    refresh();
+    getchar();
+    return inicio_descriptor_bloques;
 }
 
 int main() {
@@ -179,10 +204,8 @@ int main() {
 
     int inicio_superbloque = leerSuperBloque(fd,sectorInicioParticion);
 
-    refresh();
-
-    getchar();
-
+    int inicio_descriptor_bloques = leerDescriptorBloques(fd,inicio_superbloque);
+    
     endwin();
 
     close(fd);
