@@ -115,7 +115,7 @@ int leerParticion(int fd){
     }
 
 
-    return seleccion;
+    return -1;
 }
 
 
@@ -135,7 +135,10 @@ int main() {
     direccion_particion = leerParticion(fd);
 
     if(direccion_particion == -1){
-        printw("No se encontró la partición\n");
+        printw("Error. No se encontró ninguna particion\n\n");
+        printw("Presiona una tecla para continuar...");
+        refresh();
+        getchar();
         endwin();
         close(fd);
         return 1;
