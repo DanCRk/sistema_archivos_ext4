@@ -10,6 +10,7 @@
 #include <ctype.h>
 #include <curses.h>
 
+
 void initScreen(){
     initscr();
 	raw(); 
@@ -49,7 +50,6 @@ int seleccionaParticion(int numParticiones, unsigned int *sectoresInicio){
                 break;
         }
     }
-    clear();
     printw("Has seleccionado la partición %d \n\n", seleccion + 1);
     printw("Presiona una tecla para continuar...");
     refresh();
@@ -118,12 +118,45 @@ int leerParticion(int fd){
     return seleccion;
 }
 
+int leerSuperBloque(int fd,int inicioParticion){
+
+    // Lee el superbloque
+    int inicio_superbloque = (inicioParticion * 512) + 0x400;
+    struct ext4_super_block sb;
+    if (pread(fd, &sb, sizeof(sb), inicio_superbloque) != sizeof(sb)) {
+        printw("Error leyendo el superbloque");
+        refresh();
+        close(fd);
+        endwin();
+        return;
+    }
+
+    // Calcula el tamaño de bloque y el tamaño de inode
+    size_t tamano_bloque = 1024 << sb.s_log_block_size;
+    size_t tamano_inode = 256 << sb.s_inode_size; // Corrección aquí
+
+    // Imprime la información del superbloque
+    printw("Superblock\n\n");
+    printw("Cuenta de Inodes: %u\n\n", sb.s_inodes_count);
+    printw("Cuenta de Blocks: %u\n\n", sb.s_blocks_count_lo);
+    printw("Etiqueta Disco: %.*s\n\n", EXT4_LABEL_MAX, sb.s_volume_name);
+    printw("Primer inode: %u\n\n", sb.s_first_ino);
+    printw("Block size: %zu\n\n", tamano_bloque);
+    printw("Inode size: %zu\n\n", tamano_inode); // Corrección aquí
+    printw("Blocks per group: %u\n\n", sb.s_blocks_per_group);
+    printw("Inodes per group: %u\n\n", sb.s_inodes_per_group);
+    printw("Presiona una tecla para continuar...");
+    refresh();
+    getchar();
+    clear();
+    return inicio_superbloque;
+}
 
 int main() {
 
     initScreen();
 
-    int direccion_particion;
+    int sectorInicioParticion;
     
     int fd = open("imagen.img", O_RDONLY);
     if (fd < 0) {
@@ -132,9 +165,9 @@ int main() {
         return 1;
     }
 
-    direccion_particion = leerParticion(fd);
+    sectorInicioParticion = leerParticion(fd);
 
-    if(direccion_particion == -1){
+    if(sectorInicioParticion == -1){
         printw("Error. No se encontró ninguna particion\n\n");
         printw("Presiona una tecla para continuar...");
         refresh();
@@ -144,7 +177,7 @@ int main() {
         return 1;
     } 
 
-    printw("La partición comienza en el sector: %u\n", direccion_particion);
+    int inicio_superbloque = leerSuperBloque(fd,sectorInicioParticion);
 
     refresh();
 
