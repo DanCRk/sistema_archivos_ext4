@@ -4,3 +4,6 @@ prueba.*
 prueba
 archivo
 sistema_archivos_ext4
+.vscode
+*.img
+*.xz
