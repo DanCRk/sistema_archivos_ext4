@@ -1,4 +1,5 @@
 #include "ext4.h"
+#include "hexEditor.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -14,10 +15,10 @@
 
 void initScreen(){
     initscr();
-	raw(); 
+    raw();
 	keypad(stdscr, TRUE);	/* Para obtener F1,F2,.. */
-	noecho();
-    curs_set(0); 
+    noecho();
+    curs_set(0);
 }
 
 int seleccionaParticion(int numParticiones, unsigned int *sectoresInicio){
@@ -40,15 +41,15 @@ int seleccionaParticion(int numParticiones, unsigned int *sectoresInicio){
 
         int ch = getch(); // Obtener la tecla presionada
         switch (ch) {
-            case KEY_UP:
+        case KEY_UP:
                 if (seleccion > 0) seleccion--;
-                break;
-            case KEY_DOWN:
+            break;
+        case KEY_DOWN:
                 if (seleccion < numParticiones - 1) seleccion++;
-                break;
+            break;
             case 10: // Tecla Enter
-                continuar = 0; // Cambiar la variable de control para salir del bucle
-                break;
+            continuar = 0; // Cambiar la variable de control para salir del bucle
+            break;
         }
     }
     printw("Has seleccionado la partición %d \n\n", seleccion + 1);
@@ -91,7 +92,7 @@ int leerParticion(int fd){
 
         // Ignorar entradas de partición no utilizadas
         if (startSector != 0) {
-             // Reasignar memoria para el nuevo tamaño del arreglo
+            // Reasignar memoria para el nuevo tamaño del arreglo
             unsigned int *temp = realloc(sectoresInicio, (numParticiones + 1) * sizeof(unsigned int));
             if (temp == NULL) {
                 fprintf(stderr, "Error al asignar memoria.\n");
@@ -177,7 +178,7 @@ int leerDescriptorBloques(int fd,int inicio_superbloque){
     return descriptor_bloques.bg_inode_table_lo;
 }
 
-struct ext4_dir_entry_2** leerBloque(int fd, int inicioBloque, int *numEntradas) {
+struct ext4_dir_entry_2 **leerBloque(int fd, int inicioBloque, int *numEntradas){
     *numEntradas = 0; // Inicializar el contador de entradas
     struct ext4_dir_entry_2 **entradas = NULL; // Puntero para el arreglo de apuntadores
     int offset = 0;
@@ -231,7 +232,59 @@ struct ext4_dir_entry_2** leerBloque(int fd, int inicioBloque, int *numEntradas)
     return entradas; // Retornar el arreglo de apuntadores
 }
 
-int leerInodes(int fd, int inicioInode, int inicioParticion){
+void abrirArchivoSeleccionado(int fd, struct ext4_dir_entry_2 *entradaSeleccionada, int inicioParticion,int inicio_tabla_inodes) {
+    // Calcular la posición del inodo en el disco
+    unsigned int inicioInodeArchivo = (inicio_tabla_inodes * 0x400) + inicioParticion + (256 * (entradaSeleccionada->inode - 1));
+    
+    // Leer el inodo del archivo
+    struct ext4_inode inode;
+    if (pread(fd, &inode, sizeof(inode), inicioInodeArchivo) != sizeof(inode)) {
+        perror("Error leyendo el inode del archivo");
+        return;
+    }
+
+    // Identificar el bloque que contiene el inicio del archivo .txt
+    int bloqueContenido = -1;
+    for (int i = 12; i > 0; i--) {
+        if (inode.i_block[i] != 0) {
+            bloqueContenido = i;
+            break; // Romper el bucle después de encontrar el primer bloque no vacío
+        }
+    }
+
+    if (bloqueContenido == -1) {
+        printf("No se encontró el bloque de contenido del archivo.\n");
+        return;
+    }
+
+    // Leer solo el bloque que contiene el contenido del archivo
+    char bloque[1024]; // Asumiendo un tamaño de bloque de 1024 bytes
+    int direccion_bloque = (inode.i_block[bloqueContenido] * 0x400) + inicioParticion;
+    if (pread(fd, bloque, sizeof(bloque), direccion_bloque) != sizeof(bloque)) {
+        perror("Error leyendo el bloque de datos del archivo");
+        return;
+    }
+
+    // Crear un archivo temporal para escribir el contenido del bloque
+    char nombreTemporal[] = "tempXXXXXX";
+    int fd_temp = mkstemp(nombreTemporal);
+    if (fd_temp == -1) {
+        perror("Error creando archivo temporal");
+        return;
+    }
+    write(fd_temp, bloque, sizeof(bloque));
+    close(fd_temp);
+
+    // Llamar a hexvisor con el archivo temporal
+    edita(nombreTemporal);
+
+    // Eliminar el archivo temporal después de usarlo
+    remove(nombreTemporal);
+}
+
+
+
+int leerInodes(int fd, int inicioInode, int inicioParticion, int inicio_tabla_inodes){
     clear(); // Limpiar la pantalla
     struct ext4_inode inode;
     if (pread(fd, &inode, sizeof(inode), inicioInode) != sizeof(inode)) {
@@ -295,22 +348,26 @@ int leerInodes(int fd, int inicioInode, int inicioParticion){
             continuar = 0; // Cambiar la variable de control para salir del bucle
             // No olvides liberar la memoria de las entradas antes de finalizar
         for (int i = 0; i < numEntradas; i++) {
-            free(entradas[i]);
-        }
-        free(entradas);
+                free(entradas[i]);
+            }
+            free(entradas);
             return -1;
         }
-        
+
         switch (ch) {
-            case KEY_UP:
+        case KEY_UP:
                 if (seleccion > 0) seleccion--;
-                break;
-            case KEY_DOWN:
+            break;
+        case KEY_DOWN:
                 if (seleccion < numEntradas - 1) seleccion++;
-                break;
-            case 10: // Tecla Enter
-                continuar = 0; // Cambiar la variable de control para salir del bucle
-                break;
+            break;
+        case 10: // Tecla Enter
+            if (entradas[seleccion]->file_type == EXT4_FT_DIR){ // Asumiendo que es un archivo regular
+                continuar = 0;  // Cambiar la variable de control para salir del bucle
+            }else{
+                abrirArchivoSeleccionado(fd, entradas[seleccion], inicioParticion,inicio_tabla_inodes);
+            }
+            break;
         }
     }
 
@@ -334,7 +391,7 @@ int main(int argc, char *argv[]) {
     initScreen();
 
     int inicioParticion;
-    
+
     int fd = open((char *)argv[1], O_RDONLY);
     if (fd < 0) {
         perror("Error al abrir la imagen del sistema de archivos");
@@ -351,26 +408,20 @@ int main(int argc, char *argv[]) {
         getchar();
         endwin();
         return 1;
-    } 
+    }
 
     int inicio_superbloque = leerSuperBloque(fd,inicioParticion);
 
     int inicio_tabla_inodes = leerDescriptorBloques(fd,inicio_superbloque);
 
     long inicioInodes = (inicio_tabla_inodes * 0x400) + inicioParticion + 256;
-    long numeroInode = leerInodes(fd,inicioInodes,inicioParticion);
+    long numeroInode = leerInodes(fd,inicioInodes,inicioParticion, inicio_tabla_inodes);
 
     while(numeroInode >0){
-        printw("Inode seleccionado: %ld\n\n",numeroInode);
-
         inicioInodes = (inicio_tabla_inodes * 0x400) + inicioParticion + (256 * (numeroInode - 1));
-        printw("Inode hex: %lX\n\n",inicioInodes);
-
-        refresh();
-        getchar();
-        numeroInode = leerInodes(fd,inicioInodes, inicioParticion);
+        numeroInode = leerInodes(fd,inicioInodes, inicioParticion,inicio_tabla_inodes);
     }
-    
+
     endwin();
 
     close(fd);
