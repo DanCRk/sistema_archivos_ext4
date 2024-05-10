@@ -178,6 +178,49 @@ int leerDescriptorBloques(int fd,int inicio_superbloque){
     return descriptor_bloques.bg_inode_table_lo;
 }
 
+void abrirArchivoSeleccionado(int fd, struct ext4_dir_entry_2 *entradaSeleccionada, int inicioParticion,int inicio_tabla_inodes) {
+    // Calcular la posición del inodo en el disco
+    unsigned int inicioInodeArchivo = (inicio_tabla_inodes * 0x400) + inicioParticion + (256 * (entradaSeleccionada->inode - 1));
+    
+    // Leer el inodo del archivo
+    struct ext4_inode inode;
+    if (pread(fd, &inode, sizeof(inode), inicioInodeArchivo) != sizeof(inode)) {
+        perror("Error leyendo el inode del archivo");
+        return;
+    }
+
+    // Crear un archivo temporal para escribir el contenido completo del archivo
+    char nombreTemporal[] = "tempXXXXXX";
+    int fd_temp = mkstemp(nombreTemporal);
+    if (fd_temp == -1) {
+        perror("Error creando archivo temporal");
+        return;
+    }
+
+    // Asumiendo que el archivo es pequeño y cabe en los bloques directos
+    for (int i = 12; i >=0; i--) {
+        if (inode.i_block[i] != 0) {
+            char bloque[1024]; // Asumiendo un tamaño de bloque de 1024 bytes
+            int direccion_bloque = (inode.i_block[i] * 0x400) + inicioParticion;
+            if (pread(fd, bloque, sizeof(bloque), direccion_bloque) != sizeof(bloque)) {
+                perror("Error leyendo el bloque de datos del archivo");
+                close(fd_temp);
+                remove(nombreTemporal);
+                return;
+            }
+            // Escribir el contenido del bloque al archivo temporal
+            write(fd_temp, bloque, sizeof(bloque));
+        }
+    }
+    close(fd_temp);
+
+    // Llamar a hexvisor con el archivo temporal
+    edita(nombreTemporal);
+
+    // Eliminar el archivo temporal después de usarlo
+    remove(nombreTemporal);
+}
+
 struct ext4_dir_entry_2 **leerBloque(int fd, int inicioBloque, int *numEntradas){
     *numEntradas = 0; // Inicializar el contador de entradas
     struct ext4_dir_entry_2 **entradas = NULL; // Puntero para el arreglo de apuntadores
@@ -231,58 +274,6 @@ struct ext4_dir_entry_2 **leerBloque(int fd, int inicioBloque, int *numEntradas)
 
     return entradas; // Retornar el arreglo de apuntadores
 }
-
-void abrirArchivoSeleccionado(int fd, struct ext4_dir_entry_2 *entradaSeleccionada, int inicioParticion,int inicio_tabla_inodes) {
-    // Calcular la posición del inodo en el disco
-    unsigned int inicioInodeArchivo = (inicio_tabla_inodes * 0x400) + inicioParticion + (256 * (entradaSeleccionada->inode - 1));
-    
-    // Leer el inodo del archivo
-    struct ext4_inode inode;
-    if (pread(fd, &inode, sizeof(inode), inicioInodeArchivo) != sizeof(inode)) {
-        perror("Error leyendo el inode del archivo");
-        return;
-    }
-
-    // Identificar el bloque que contiene el inicio del archivo .txt
-    int bloqueContenido = -1;
-    for (int i = 12; i > 0; i--) {
-        if (inode.i_block[i] != 0) {
-            bloqueContenido = i;
-            break; // Romper el bucle después de encontrar el primer bloque no vacío
-        }
-    }
-
-    if (bloqueContenido == -1) {
-        printf("No se encontró el bloque de contenido del archivo.\n");
-        return;
-    }
-
-    // Leer solo el bloque que contiene el contenido del archivo
-    char bloque[1024]; // Asumiendo un tamaño de bloque de 1024 bytes
-    int direccion_bloque = (inode.i_block[bloqueContenido] * 0x400) + inicioParticion;
-    if (pread(fd, bloque, sizeof(bloque), direccion_bloque) != sizeof(bloque)) {
-        perror("Error leyendo el bloque de datos del archivo");
-        return;
-    }
-
-    // Crear un archivo temporal para escribir el contenido del bloque
-    char nombreTemporal[] = "tempXXXXXX";
-    int fd_temp = mkstemp(nombreTemporal);
-    if (fd_temp == -1) {
-        perror("Error creando archivo temporal");
-        return;
-    }
-    write(fd_temp, bloque, sizeof(bloque));
-    close(fd_temp);
-
-    // Llamar a hexvisor con el archivo temporal
-    edita(nombreTemporal);
-
-    // Eliminar el archivo temporal después de usarlo
-    remove(nombreTemporal);
-}
-
-
 
 int leerInodes(int fd, int inicioInode, int inicioParticion, int inicio_tabla_inodes){
     clear(); // Limpiar la pantalla
