@@ -21,6 +21,13 @@ void initScreen(){
     curs_set(0);
 }
 
+void mostrarBarraDeEstadoDir() {
+    int max_y, max_x;
+    getmaxyx(stdscr, max_y, max_x); // Obtiene las dimensiones de la ventana
+    mvprintw(max_y - 1, 0, "ESC: Salir | flehca arriba: Subir | flehca abajo: Bajar | Enter: Seleccionar"); // Muestra los comandos
+    clrtoeol(); // Limpia el resto de la línea
+}
+
 int seleccionaParticion(int numParticiones, unsigned int *sectoresInicio){
     int seleccion = 0;
     int continuar = 1; // Variable de control para el bucle
@@ -334,13 +341,15 @@ int leerInodes(int fd, int inicioInode, int inicioParticion, int inicio_tabla_in
                 attroff(A_REVERSE);
             }
         }
+        mostrarBarraDeEstadoDir();
         refresh(); // Actualizar la pantalla
 
         int ch = getch(); // Obtener la tecla presionada
-        if (ch == 3) { // Ctrl+C
+        if (ch == 27) { // esc
+            printw("Se salio de aqui\n");
             continuar = 0; // Cambiar la variable de control para salir del bucle
             // No olvides liberar la memoria de las entradas antes de finalizar
-        for (int i = 0; i < numEntradas; i++) {
+            for (int i = 0; i < numEntradas; i++) {
                 free(entradas[i]);
             }
             free(entradas);
@@ -410,7 +419,10 @@ int main(int argc, char *argv[]) {
     long inicioInodes = (inicio_tabla_inodes * 0x400) + inicioParticion + 256;
     unsigned int numeroInode = leerInodes(fd,inicioInodes,inicioParticion, inicio_tabla_inodes);
 
-     while(numeroInode >0){
+    while(numeroInode >0){
+        printw("Inode seleccionado: %u\n\n", numeroInode);
+        refresh();
+        getchar();
         unsigned int grupoInodes = numeroInode / 2040;
         if (grupoInodes != 0){
             numeroInode = numeroInode % 2040;
