@@ -24,7 +24,7 @@ void initScreen(){
 void mostrarBarraDeEstadoDir() {
     int max_y, max_x;
     getmaxyx(stdscr, max_y, max_x); // Obtiene las dimensiones de la ventana
-    mvprintw(max_y - 1, 0, "ESC: Salir | flehca arriba: Subir | flehca abajo: Bajar | Enter: Seleccionar"); // Muestra los comandos
+    mvprintw(max_y - 1, 0, "CRTL + C: Salir | flehca arriba: Subir | flehca abajo: Bajar | Enter: Seleccionar"); // Muestra los comandos
     clrtoeol(); // Limpia el resto de la línea
 }
 
@@ -247,7 +247,7 @@ struct ext4_dir_entry_2 **leerBloque(int fd, int inicioBloque, int *numEntradas)
             return NULL;
         }
 
-        if (entrada.rec_len == 0 || entrada.name_len == 0) {
+        if (entrada.rec_len == 0 || entrada.name_len == 0 || entrada.inode == 65280) {
             break;
         }
 
@@ -343,10 +343,8 @@ int leerInodes(int fd, int inicioInode, int inicioParticion, int inicio_tabla_in
         }
         mostrarBarraDeEstadoDir();
         refresh(); // Actualizar la pantalla
-
         int ch = getch(); // Obtener la tecla presionada
-        if (ch == 27) { // esc
-            printw("Se salio de aqui\n");
+        if (ch == 3) { // esc
             continuar = 0; // Cambiar la variable de control para salir del bucle
             // No olvides liberar la memoria de las entradas antes de finalizar
             for (int i = 0; i < numEntradas; i++) {
@@ -417,12 +415,9 @@ int main(int argc, char *argv[]) {
     int inicio_tabla_inodes = leerDescriptorBloques(fd,inicio_superbloque+0x400,1);
 
     long inicioInodes = (inicio_tabla_inodes * 0x400) + inicioParticion + 256;
-    unsigned int numeroInode = leerInodes(fd,inicioInodes,inicioParticion, inicio_tabla_inodes);
+    int numeroInode = leerInodes(fd,inicioInodes,inicioParticion, inicio_tabla_inodes);
 
     while(numeroInode >0){
-        printw("Inode seleccionado: %u\n\n", numeroInode);
-        refresh();
-        getchar();
         unsigned int grupoInodes = numeroInode / 2040;
         if (grupoInodes != 0){
             numeroInode = numeroInode % 2040;
