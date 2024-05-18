@@ -103,7 +103,11 @@ void edita(char *filename) {
     /* Lee archivo */
     char *map = mapFile(filename);
     if (map == NULL) {
-      exit(EXIT_FAILURE);
+      printw("Error al mapear el archivo\n");
+      printw("Presiona una tecla para continuar...\n");
+      refresh();
+      getchar();
+      return;
     }
 
     
