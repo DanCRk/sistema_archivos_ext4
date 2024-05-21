@@ -12,6 +12,15 @@
 #include <string.h>
 #include <curses.h>
 
+// Estructura para almacenar los detalles de una partición
+typedef struct {
+    unsigned int startSector;
+    unsigned int chs;
+    unsigned int tipo;
+    unsigned int lba;
+    unsigned int tam;
+} Particion;
+
 
 void initScreen(){
     initscr();
@@ -28,18 +37,20 @@ void mostrarBarraDeEstadoDir() {
     clrtoeol(); // Limpia el resto de la línea
 }
 
-int seleccionaParticion(int numParticiones, unsigned int *sectoresInicio){
+
+
+int seleccionaParticion(int numParticiones, Particion *particiones){
     int seleccion = 0;
     int continuar = 1; // Variable de control para el bucle
 
     while (continuar) {
         clear(); // Limpiar la pantalla
-        printw("Selecciona una partición\n\n");
+        printw("Particion\t\tCHS\t\tTipo\t\tLBA\t\tTAM\n\n");
         for (int i = 0; i < numParticiones; i++) {
             if (i == seleccion) {
                 attron(A_REVERSE); // Resaltar la selección actual
             }
-            printw("Partición %d: Sector de inicio %u\n\n", i + 1, sectoresInicio[i]);
+            printw("%d\t\t%d\t\t%d\t\t%d\t\t%d\n", i, particiones[i].chs, particiones[i].tipo, particiones[i].lba, particiones[i].tam);
             if (i == seleccion) {
                 attroff(A_REVERSE);
             }
@@ -59,71 +70,63 @@ int seleccionaParticion(int numParticiones, unsigned int *sectoresInicio){
             break;
         }
     }
-    printw("Has seleccionado la partición %d \n\n", seleccion + 1);
-    printw("Presiona una tecla para continuar...");
-    refresh();
-    getchar();
     clear();
-    return sectoresInicio[seleccion];
+    return particiones[seleccion].lba;
 }
 
-int leerParticion(int fd){
-    unsigned int *sectoresInicio = NULL;
-    // Leer los primeros 512 bytes (tamaño de un sector)
+int leerParticion(int fd) {
+    Particion *particiones = NULL;
     unsigned char mbr[512];
     ssize_t bytesLeidos = read(fd, mbr, sizeof(mbr));
     if (bytesLeidos == -1) {
         perror("Error al leer el MBR");
         return 1;
     }
-
-    // Asegurarse de que se leyeron los 512 bytes completos
     if (bytesLeidos != sizeof(mbr)) {
         fprintf(stderr, "No se leyeron los 512 bytes completos del MBR\n");
         return 1;
     }
 
-    // La tabla de particiones comienza en el byte 446 del MBR
     int partitionTableStart = 446;
-    // Cada entrada de la tabla de particiones tiene 16 bytes
     int partitionEntrySize = 16;
-    // La dirección de inicio de la partición está en los bytes 8-11 de cada entrada
     int startAddressOffset = 8;
-
     int numParticiones = 0;
 
-    // Iterar a través de las cuatro entradas de la tabla de particiones
     for (int i = 0; i < 4; i++) {
         int entryStart = partitionTableStart + (i * partitionEntrySize);
         unsigned int startSector = *(unsigned int *)&mbr[entryStart + startAddressOffset];
+        unsigned int chs = *(unsigned int *)&mbr[entryStart]; // CHS
+        unsigned char tipo = mbr[entryStart + 4]; // Tipo
+        unsigned int tam = *(unsigned int *)&mbr[entryStart + 12]; // Tamaño
 
-        // Ignorar entradas de partición no utilizadas
         if (startSector != 0) {
-            // Reasignar memoria para el nuevo tamaño del arreglo
-            unsigned int *temp = realloc(sectoresInicio, (numParticiones + 1) * sizeof(unsigned int));
+            Particion *temp = realloc(particiones, (numParticiones + 1) * sizeof(Particion));
             if (temp == NULL) {
                 fprintf(stderr, "Error al asignar memoria.\n");
-                free(sectoresInicio);
+                free(particiones);
                 return 1;
             }
-            sectoresInicio = temp;
+            particiones = temp;
 
-            // Almacenar el sector de inicio
-            sectoresInicio[numParticiones] = startSector;
+            particiones[numParticiones].startSector = startSector;
+            particiones[numParticiones].chs = chs;
+            particiones[numParticiones].tipo = tipo;
+            particiones[numParticiones].lba = startSector; // LBA es el mismo que startSector
+            particiones[numParticiones].tam = tam;
+
             numParticiones++;
         }
     }
+
     int seleccion = 0;
-    if(sectoresInicio != NULL){
+    if (particiones != NULL) {
         printw("Seleccionar particion\n\n");
-        seleccion = seleccionaParticion(numParticiones, sectoresInicio);
-    }else{
+        seleccion = seleccionaParticion(numParticiones, particiones);
+    } else {
         return -1;
     }
 
-    free(sectoresInicio);
-
-
+    free(particiones);
     return seleccion;
 }
 
@@ -187,9 +190,16 @@ int leerDescriptorBloques(int fd,int inicio_descriptor_bloques,int imprimirInfo)
     return descriptor_bloques.bg_inode_table_lo;
 }
 
-void abrirArchivoSeleccionado(int fd, struct ext4_dir_entry_2 *entradaSeleccionada, int inicioParticion,int inicio_tabla_inodes) {
+void abrirArchivoSeleccionado(int fd, struct ext4_dir_entry_2 *entradaSeleccionada, int inicioParticion,int inicio_superbloque) {
     // Calcular la posición del inodo en el disco
-    unsigned int inicioInodeArchivo = (inicio_tabla_inodes * 0x400) + inicioParticion + (256 * (entradaSeleccionada->inode - 1));
+    unsigned int grupoInodes = entradaSeleccionada->inode / 2040;
+    if (grupoInodes != 0){
+        entradaSeleccionada->inode = entradaSeleccionada->inode % 2040;
+    }
+    unsigned int tamanoGDT = grupoInodes * 0x40;
+    unsigned int descriptor = (inicio_superbloque + 0x400) + tamanoGDT;
+    unsigned int inicio= leerDescriptorBloques(fd, descriptor,0);
+    unsigned int inicioInodeArchivo = (inicio * 0x400) + inicioParticion + (0x100*(entradaSeleccionada->inode - 1));
     
     // Leer el inodo del archivo
     struct ext4_inode inode;
@@ -284,7 +294,7 @@ struct ext4_dir_entry_2 **leerBloque(int fd, int inicioBloque, int *numEntradas)
     return entradas; // Retornar el arreglo de apuntadores
 }
 
-int leerInodes(int fd, int inicioInode, int inicioParticion, int inicio_tabla_inodes){
+int leerInodes(int fd, int inicioInode, int inicioParticion, int inicio_superbloque){
     clear(); // Limpiar la pantalla
     struct ext4_inode inode;
     if (pread(fd, &inode, sizeof(inode), inicioInode) != sizeof(inode)) {
@@ -365,7 +375,7 @@ int leerInodes(int fd, int inicioInode, int inicioParticion, int inicio_tabla_in
             if (entradas[seleccion]->file_type == EXT4_FT_DIR){ // Asumiendo que es un archivo regular
                 continuar = 0;  // Cambiar la variable de control para salir del bucle
             }else{
-                abrirArchivoSeleccionado(fd, entradas[seleccion], inicioParticion,inicio_tabla_inodes);
+                abrirArchivoSeleccionado(fd, entradas[seleccion], inicioParticion,inicio_superbloque);
             }
             break;
         }
@@ -415,7 +425,7 @@ int main(int argc, char *argv[]) {
     int inicio_tabla_inodes = leerDescriptorBloques(fd,inicio_superbloque+0x400,1);
 
     long inicioInodes = (inicio_tabla_inodes * 0x400) + inicioParticion + 256;
-    int numeroInode = leerInodes(fd,inicioInodes,inicioParticion, inicio_tabla_inodes);
+    int numeroInode = leerInodes(fd,inicioInodes,inicioParticion, inicio_superbloque);
 
     while(numeroInode >0){
         unsigned int grupoInodes = numeroInode / 2040;
@@ -426,7 +436,7 @@ int main(int argc, char *argv[]) {
         unsigned int descriptor = (inicio_superbloque + 0x400) + tamanoGDT;
         unsigned int inicio= leerDescriptorBloques(fd, descriptor,0);
         inicio = (inicio * 0x400) + inicioParticion + (0x100*(numeroInode - 1));
-        numeroInode = leerInodes(fd,inicio, inicioParticion,inicio_tabla_inodes);
+        numeroInode = leerInodes(fd,inicio, inicioParticion,inicio_superbloque);
     }
 
     endwin();
